@@ -1,7 +1,7 @@
 # Findings
 
-Four measurements NOVA was built to make. Two of them are corrections of earlier
-results in this same document, which is the more useful half.
+Five measurements NOVA was built to make. Three of them are corrections of
+earlier results in this same document, which is the more useful half.
 
 Everything here reproduces from a clean checkout on a 10-core Apple M5, CPU only.
 
@@ -85,6 +85,9 @@ change is visible to the policy even though it never trained on one.
 meaningfully hurts here is heavier limbs, 93% retained at +30%. It is the axis that
 changes what a given torque *does* rather than what the arm looks like, and section
 3 shows it costs far more once the clock is tight (56% retained).
+
+> Section 5 finds the opposite on a walking robot, where nearly doubling limb mass
+> costs only 9%. "Mass is expensive" is a fact about this arm, not about robots.
 
 ### The mistake
 
@@ -216,6 +219,72 @@ A gap this exposes, still open: obs-layout versioning protects against changed
 *observations*, but a change to a robot's *geometry* is not covered. A policy
 exported against the old straight-legged quadruped is still accepted and simply
 behaves differently.
+
+---
+
+---
+
+## 5. On a robot that carries its own weight, mass is cheap and actuation is everything
+
+`python -m examples.cross_body_locomotion --seeds 3` — about 6 minutes.
+
+Section 2 concluded that mass was the expensive axis. That was measured on a
+bolted-down arm, which only has to swing its limbs. A quadruped has to hold its
+whole body up on them, so it should be the harsher test. It is not — it inverts
+the result.
+
+Three training seeds on the standard quadruped, scored zero-shot on bodies it
+never saw:
+
+| body | distance (m) | retained | native control |
+|---|---|---|---|
+| baseline | 7.28 ± 0.67 | — | — |
+| legs +20% | 7.13 ± 1.54 | 98% | — |
+| legs −20% | 5.96 ± 0.60 | 82% | — |
+| torso longer +30% | 7.37 ± 1.25 | 101% | — |
+| torso wider +30% | 7.24 ± 1.03 | 99% | — |
+| **heavy legs +40%** | 6.60 ± 1.15 | **91%** | — |
+| motors −30% | 6.11 ± 0.43 | 84% | — |
+| **motors −50%** | 2.00 ± 0.92 | **27%** | 4.85 m |
+| motors +50% | 2.66 ± 0.19 | 37% | **3.00 m** |
+| **damping ×3** | 3.30 ± 0.43 | **45%** | 7.93 m |
+
+**Mass barely registers.** Legs 40% thicker — nearly double the limb mass, on a
+robot that must lift them every step — costs 9%. On the arm the same family of
+change cost 44% once the clock was tight. The walking policy has proprioception
+and a gravity vector in its observation and a dense velocity reward, so it can
+feel a heavier leg and push harder; the arm's open-loop torque profile could not.
+
+**Actuation still dominates.** Halving torque drops it to 27% of baseline.
+Tripling damping drops it to 45%. Same split as the arm — what the policy cannot
+observe is what breaks it — but here the split is between actuation and
+*everything else*, geometry and mass alike.
+
+### The control caught a third false conclusion
+
+`feasible()` is arm-specific: it compares holding torque to available torque for
+a two-link arm and returns `True` for everything else, so a quadruped gets no
+static check at all. Rather than trust the transfer numbers, every body retaining
+under 55% was given a policy trained natively *on it*.
+
+That immediately paid for itself. **`motors +50%` transferred at 37% — but a
+policy trained natively on it only reaches 3.00 m against the baseline's 7.28 m.**
+A quadruped with 50% stronger motors is simply worse at this task; it has enough
+torque to launch itself off the ground and the reward's alive bonus does not
+discourage that. Reported without the control, it would have looked like a 63%
+transfer collapse. It is not a transfer result at all.
+
+The other two are real: `motors −50%` transfers at 2.00 m but trains to 4.85 m,
+and `damping ×3` transfers at 3.30 m but trains to **7.93 m — better than
+baseline**. High damping is a fine robot to be if you train for it, and a
+terrible one to be handed.
+
+This is the third time in this document that a dramatic number turned out to be
+about the body rather than the policy. The first two were caught by a static
+physics check; this one needed an empirical control, because no static check
+covers a legged robot. The general lesson is not "add a torque check" — it is
+that **a zero-shot transfer number is meaningless without knowing what a policy
+trained on that body can do.**
 
 ---
 

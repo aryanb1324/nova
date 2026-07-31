@@ -26,3 +26,4 @@ backend/*.egg-info/
 backend/user_robots/
 backend/bench_results.jsonl
 backend/cross_body.json
+backend/cross_body_locomotion.json
