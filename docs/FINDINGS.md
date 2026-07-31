@@ -1,6 +1,7 @@
 # Findings
 
-Two measurements NOVA was built to make, and one mistake worth reading about.
+Four measurements NOVA was built to make. Two of them are corrections of earlier
+results in this same document, which is the more useful half.
 
 Everything here reproduces from a clean checkout on a 10-core Apple M5, CPU only.
 
@@ -67,21 +68,23 @@ Three training seeds, held-out episodes:
 | damping ×3 | 97% ± 6 | 101% |
 | heavy links +60% *(under-actuated)* | 30% ± 6 | n/a |
 
-**Actuation is nearly free.** Halving motor torque, adding 50%, or tripling joint
-damping each cost nothing measurable. This is the surprising half: motor strength
-appears nowhere in the observation, so the policy cannot be adapting to it. The
-likely explanation is slack in the task — two seconds to reach, dense shaping, and
-a controller that already saturates — so a weaker arm still arrives in time. A
-tighter time budget would probably expose it, which is the obvious next
-experiment.
+**Actuation appears nearly free.** Halving motor torque, adding 50%, or tripling
+joint damping each cost nothing measurable. Motor strength appears nowhere in the
+observation, so the policy cannot be adapting to it — which suggested slack in the
+task rather than robustness in the policy.
+
+> **Read section 3 before taking this at face value.** That suspicion was correct:
+> under a tighter time budget the actuation perturbations collapse by 22–38 points.
+> The invariance was headroom, not robustness.
 
 **Geometry degrades gracefully.** A 40% longer forearm still retains 90%. The
 fingertip and the target are both in the observation, so part of a geometry
 change is visible to the policy even though it never trained on one.
 
-**Mass is what costs.** The only feasible perturbation that meaningfully hurts is
-heavier limbs — 93% retained at +30%. It is the axis that changes what a given
-torque *does*, rather than what the arm looks like.
+**Mass is what costs** — at this budget. The only feasible perturbation that
+meaningfully hurts here is heavier limbs, 93% retained at +30%. It is the axis that
+changes what a given torque *does* rather than what the arm looks like, and section
+3 shows it costs far more once the clock is tight (56% retained).
 
 ### The mistake
 
@@ -105,6 +108,117 @@ one, and nothing but an explicit check distinguished them.
 
 ---
 
+## 3. That actuation result was an artifact of the time budget
+
+`python -m examples.cross_body_horizon --mode study --horizon 40 --seeds 3`
+
+Section 2 closed by guessing that actuation looked free because the task had
+slack — two seconds to reach, dense shaping — and that a tighter budget would
+expose it. It does.
+
+First the slack itself, measured rather than assumed. `score()` reads only the
+final step of an episode, so it cannot distinguish a policy that arrives at step
+12 and parks from one that scrapes in at step 95. Recording the *first* step
+inside the success radius separates them:
+
+| body | first-arrival step (30 held-out episodes) |
+|---|---|
+| baseline | median 21, p75 29, p90 37, max 48 |
+| motors −30% | median 27, p75 40, p90 52, max 67 |
+| motors −50% | median 38, p75 52, p90 67, max 92 |
+| motors +50% | median 16, p75 22, p90 26, max 35 |
+
+The baseline never used more than half its budget. The −50% arm needed nearly all
+of it. Both scored 96%, because both finished, and the clock hid the gap.
+
+So: a 40-step variant (`reach_short`, 0.8 s — a `ReachEnv` subclass with a smaller
+`max_steps` and an untouched observation, registered as a separate task so the
+built-in `reach` keeps its 100-step horizon). 40 sits just above the baseline's
+worst case and well below the weak arm's. Baseline trains to 98% ± 2 there, so
+the horizon is tight rather than impossible. Both columns come from the same code
+path, three seeds, held-out episodes:
+
+| body | success @100 | success @40 | retained @100 | retained @40 |
+|---|---|---|---|---|
+| baseline | 96% ± 5 | 98% ± 2 | — | — |
+| forearm +20% | 92% ± 5 | 94% ± 2 | 97% | 97% |
+| forearm +40% | 86% ± 12 | 84% ± 13 | 90% | 86% |
+| upper arm +20% | 94% ± 7 | 93% ± 7 | 99% | 95% |
+| both links +20% | 92% ± 8 | 93% ± 3 | 97% | 95% |
+| links −20% | 98% ± 2 | 100% ± 0 | 102% | 102% |
+| motors −30% | 96% ± 5 | 94% ± 2 | 100% | 97% |
+| **motors −50%** | 96% ± 5 | **77% ± 6** | 100% | **78%** |
+| motors +50% | 96% ± 5 | 93% ± 3 | 100% | 95% |
+| **heavy links +30%** | 89% ± 2 | **54% ± 2** | 93% | **56%** |
+| **damping ×3** | 97% ± 6 | **62% ± 5** | 101% | **64%** |
+| heavy links +60% *(under-actuated)* | 30% ± 6 | 28% ± 5 | n/a | n/a |
+
+**Geometry is untouched; actuation collapses.** Every link-length perturbation
+moves 0–3 points, inside the seed spread. The three perturbations that change what
+a given torque *does* — weaker motors, heavier limbs, more damping — lose 22 to 38
+points of retention. The distinction the study was built to draw, between what the
+policy can partly see in its observation and what it cannot see at all, was real
+the whole time. It was invisible at 100 steps because both arms had time to finish.
+
+The right reading of the original number is not "the policy is robust to
+actuation." It is **"the task did not ask."** Invariance measured with slack in the
+budget is a statement about the budget.
+
+`feasible()` still draws the line in the right place. `damping ×3` and `heavy links
++30%` both lose ~37 points here and both are correctly called feasible — the check
+compares holding torque against available torque, certifying that a body can hold
+itself up, not that it can move quickly. Those are genuine transfer failures on
+bodies that *could* do the task, which is exactly what the under-actuated control
+exists to be contrasted against.
+
+---
+
+## 4. The quadruped's bad gait was a physics bug, not a reward problem
+
+The quadruped was the project's weakest demo: a 2.8 m shuffle where the rover
+managed 13 m. The obvious diagnosis was the reward — it had no gait structure at
+all, nothing rewarding foot clearance or penalizing thrash.
+
+That diagnosis was wrong, and the reward work that followed from it made things
+worse. Every standard legged-locomotion term, implemented and measured:
+
+| variant | seeds | distance (m) | fall rate |
+|---|---|---|---|
+| baseline | 5 | 3.34 ± 0.83 | 0.67 |
+| air-time + action-rate + tilt | 3 | 2.80 ± 0.32 | 0.98 |
+| same, lower weight + fall penalty | 3 | 2.87 ± 0.14 | 0.90 |
+| velocity tracking @ 1 m/s | 1 | 3.87 | 0.43 |
+| **spawn fix, no reward change** | **5** | **7.28 ± 1.17** | **0.18** |
+| spawn fix + air-time | 3 | 5.63 ± 1.00 | 0.32 |
+
+The actual bug: the quadruped spawned with its **feet 8.5 cm below the floor**.
+`build()` set a start height with a comment claiming the legs spawn "partly
+folded" — but nothing folded them. `qpos0` was zeros, so the legs were locked
+straight at 0.34 m under a torso at 0.285 m. The contact solver resolved the
+interpenetration by launching the robot: with zero torque applied it left the
+ground at **+1.94 m/s and peaked at 0.50 m**, 75% above its own spawn height.
+Every episode began with a somersault the policy had to survive before it could
+try to walk. That was the "scramble".
+
+The fix solves 2-link IK for a crouched stance that puts each foot exactly on the
+floor, and emits the legs already folded. Zero-torque launch becomes a −0.14 m/s
+settle. Nothing about the reward changed — `locomotion.py` is byte-for-byte
+unmodified, and the rover that shares it is per-seed identical to four decimal
+places.
+
+Two things worth taking from this. **A comment asserted behaviour the code never
+implemented**, and it read plausibly enough to send the investigation at the
+reward for a long time. And **reward engineering on top of a broken simulation
+made the numbers worse while looking like progress** — the air-time term bought
+leaping and a 98% fall rate on a robot that was already being thrown into the air.
+
+A gap this exposes, still open: obs-layout versioning protects against changed
+*observations*, but a change to a robot's *geometry* is not covered. A policy
+exported against the old straight-legged quadruped is still accepted and simply
+behaves differently.
+
+---
+
 ## What this is not
 
 - **Not novel robotics research.** Small MuJoCo tasks, standard algorithms.
@@ -115,7 +229,8 @@ one, and nothing but an explicit check distinguished them.
   machine. The transfer numbers describe *this* reach task; the methodology is
   the transferable part, not the percentages.
 - **Not enough seeds to settle close calls.** Three to five seeds bounds gross
-  differences. It does not adjudicate a 10-point gap.
+  differences — a 22-point collapse is safe, a 3-point move is not. Nothing
+  here adjudicates a 10-point gap.
 
 ## Reproducing
 

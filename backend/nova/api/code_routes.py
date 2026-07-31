@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .. import starters
 from .attach import hub
-from .runner import execution_enabled, is_local, runner
+from .runner import behind_proxy, execution_enabled, is_local, runner
 
 router = APIRouter()
 
@@ -35,6 +35,16 @@ def _guard(request: Request) -> None:
             "code execution is disabled (NOVA_CODE_EXECUTION=off). "
             "Upload a trained .onnx policy instead.",
         )
+    if behind_proxy(request.headers):
+        # Fails closed deliberately: once anything is rewriting the peer address,
+        # a "loopback" answer here means nothing. See runner.behind_proxy.
+        raise HTTPException(
+            403,
+            "this request carries reverse-proxy headers, so the client address "
+            "cannot be trusted and code execution is refused. If you are running "
+            "NOVA behind a proxy, set NOVA_CODE_EXECUTION=off and use policy "
+            "uploads instead.",
+        )
     client = request.client.host if request.client else None
     if not is_local(client):
         raise HTTPException(
@@ -57,7 +67,8 @@ def code_status(request: Request) -> dict:
     client = request.client.host if request.client else None
     current = runner.current
     return {
-        "enabled": execution_enabled() and is_local(client),
+        "enabled": execution_enabled() and is_local(client)
+                   and not behind_proxy(request.headers),
         "reason": None if execution_enabled() else "NOVA_CODE_EXECUTION=off",
         "running": bool(current and current.alive),
         "run": current.summary() if current else None,

@@ -9,6 +9,10 @@ actually doing, and honest scoring on episodes your code never saw.
 
 Runs entirely on your own machine. No hardware, no cloud, no accounts.
 
+[![CI](https://github.com/aryanb1324/nova/actions/workflows/ci.yml/badge.svg)](https://github.com/aryanb1324/nova/actions/workflows/ci.yml)
+
+![A 3-DoF arm reaching three randomly placed targets, trained from scratch in 35 seconds](docs/nova-reach.gif)
+
 **[Findings](docs/FINDINGS.md)** — measured results, including a cross-embodiment
 transfer study and a conclusion this project got wrong, then corrected.
 
@@ -129,6 +133,11 @@ from it — "inertia breaks generalization" — was simply wrong.
 That check lives in `nova/study/cross_body.py`; the raw per-seed data lands in
 `cross_body.json`.
 
+**This result did not survive its own follow-up.** The actuation-invariance above
+turned out to be slack in a two-second episode: under a 0.8 s budget, weaker
+motors lose 22 points and heavier limbs lose 37, while geometry is unchanged.
+[Findings](docs/FINDINGS.md) has the numbers.
+
 ### Is running code safe?
 
 Running a script you typed, on your own computer, is not remote code execution —
@@ -166,14 +175,41 @@ valid, simulatable body.
 | Quadruped | walk forward | 34 | 8 | 5 s at 50 Hz |
 
 Throughput is 12,000–16,000 environment steps/second on a 10-core M5. For
-reference, the built-in PPO reaches **96% ± 5** on the reach task in ~30 s of
-training (3 seeds, held-out episodes). The rover drives 13.2 m in ~13 s and the
-quadruped manages a 2.8 m shuffle in ~66 s — both still single-seed numbers, and
-so should be read as indicative rather than measured. The quadruped is the honest
-weak spot either way: its reward has no gait structure yet.
+reference and measured across seeds on held-out episodes: the built-in PPO
+reaches **96% ± 5** on reach (3 seeds), the rover drives **13.95 ± 0.87 m**
+(3 seeds), and the quadruped travels **7.28 ± 1.17 m** (5 seeds).
+
+The quadruped number was 3.34 ± 0.83 m until recently, and the cause was not the
+reward — it was a physics bug. See [Findings](docs/FINDINGS.md).
 
 Every parameter combination is checked: all 47 slider extremes across the three
 templates compile and step without producing a non-finite state.
+
+## Deploying it
+
+NOVA runs as a single container: the frontend is built into `frontend/dist` and
+served by FastAPI at `/`, with the API and websockets on the same origin.
+
+```sh
+docker build -t nova .
+docker run --rm -p 8000:8000 \
+  -e NOVA_EVAL_SALT="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" nova
+```
+
+A public deployment is **artifact-only**: people upload a trained `.onnx` policy —
+data, scored in an isolated process — and the in-browser Python editor is off.
+The image defaults to `NOVA_CODE_EXECUTION=off` and you should leave it there.
+
+That default is load-bearing, not belt-and-braces. Uvicorn rewrites the client
+address from `X-Forwarded-For`, so behind a same-host reverse proxy a forged
+header could otherwise defeat the loopback check that guards code execution.
+NOVA now also refuses code execution outright whenever proxy headers are present,
+but the environment variable is still the setting you want.
+
+Set `NOVA_EVAL_SALT` too, or held-out seeds are reproducible by anyone and the
+held-out score means nothing. There is no auth, no quota, and no rate limiting.
+
+[**docs/DEPLOY.md**](docs/DEPLOY.md) has the security model, sizing, and Fly.io steps.
 
 ## Use it as a library, or fork it
 

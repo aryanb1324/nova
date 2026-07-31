@@ -1,0 +1,34 @@
+# Keep the build context to source only. Everything excluded here is either
+# rebuilt inside the image, machine-local, or state that must not be baked in.
+
+.git
+.gitignore
+.claude
+.DS_Store
+.venv
+dev.sh
+LICENSE
+README.md
+docs/
+
+# Rebuilt in the image.
+**/node_modules
+frontend/dist
+frontend/.vite
+
+# Byte-compiled and editable-install leftovers.
+**/__pycache__
+*.py[cod]
+backend/build
+backend/*.egg-info
+
+# Local state. Baking someone's runs or uploaded policies into a public image
+# would publish them.
+backend/runs
+backend/policies
+backend/user_scripts
+backend/user_robots
+*.onnx
+*.onnx.data
+backend/bench_results.jsonl
+backend/cross_body.json

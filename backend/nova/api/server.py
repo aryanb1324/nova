@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
+import os
+import pathlib
 import threading
 import time
 import traceback
@@ -17,6 +19,7 @@ import mujoco
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from starlette.staticfiles import StaticFiles
 
 from .. import envs, robots
 from ..envs import scene as scene_mod
@@ -316,3 +319,50 @@ async def ws_train(ws: WebSocket) -> None:
             await ws.close()
         except RuntimeError:
             pass
+
+
+# --------------------------------------------------------------------------
+# Built frontend
+# --------------------------------------------------------------------------
+
+#: Where `npm run build` puts the bundle. Overridable so an image can lay the
+#: two halves out however it likes.
+FRONTEND_DIST = pathlib.Path(
+    os.environ.get("NOVA_FRONTEND_DIST")
+    or pathlib.Path(__file__).resolve().parents[3] / "frontend" / "dist"
+)
+
+
+class _FrontendFiles(StaticFiles):
+    """StaticFiles that declines websocket scopes instead of asserting on them.
+
+    A mount at `/` is the last route in the table, so it also catches websocket
+    connections to paths no `/ws` route claimed. Plain StaticFiles asserts the
+    scope is HTTP and the connection fails with a 500 and a traceback; closing
+    before accept restores Starlette's own answer for an unrouted websocket.
+    """
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await send({"type": "websocket.close", "code": 1000})
+            return
+        await super().__call__(scope, receive, send)
+
+
+def _mount_frontend() -> bool:
+    """Serve the built frontend at `/`, if there is one.
+
+    Deliberately the last thing the module does: Starlette matches routes in
+    registration order, so every `/api` and `/ws` route above is resolved first
+    and this mount only ever sees paths nothing else claimed. In development
+    there is no `dist/` and nothing is mounted at all - Vite keeps serving the
+    app and proxying to this process, exactly as before.
+    """
+    if not (FRONTEND_DIST / "index.html").is_file():
+        return False
+    # html=True: `/` returns index.html rather than a directory listing.
+    app.mount("/", _FrontendFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+    return True
+
+
+SERVING_FRONTEND = _mount_frontend()

@@ -39,6 +39,33 @@ def is_local(client_host: str | None) -> bool:
     return client_host in LOOPBACK
 
 
+#: Headers a reverse proxy adds. Their presence means the peer address cannot be
+#: trusted for an authorization decision.
+PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host")
+
+
+def behind_proxy(headers) -> bool:
+    """True if this request arrived through something that rewrites the client.
+
+    This exists because the loopback check alone is not sufficient, and the
+    reason is sharper than "a proxy looks local". Uvicorn enables
+    ProxyHeadersMiddleware by default, trusting 127.0.0.1, and it *overwrites*
+    `request.client.host` from `X-Forwarded-For`. Measured against this server:
+
+        curl /api/code/status                       -> enabled: true
+        curl -H 'X-Forwarded-For: 8.8.8.8' /...     -> enabled: false
+
+    The address is therefore attacker-controllable. Invert that example and a
+    remote request carrying `X-Forwarded-For: 127.0.0.1`, arriving through a
+    same-host nginx or Caddy, reads as loopback - and would have been handed
+    arbitrary code execution.
+
+    So: any forwarding header at all and we refuse. A genuinely local request
+    typed into the editor on this machine carries none of them.
+    """
+    return any(h in headers for h in PROXY_HEADERS)
+
+
 class CodeRun:
     """One user script, running as a child process."""
 
