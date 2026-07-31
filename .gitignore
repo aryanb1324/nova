@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Training artifacts: policies and rollouts are regenerated, not reviewed.
+backend/runs/*
+!backend/runs/.gitkeep
+backend/policies/
+*.onnx
+# torch's exporter writes weights to a sidecar for larger graphs
+*.onnx.data
+
+# Local editor/agent settings, not project config
+.claude/settings.local.json
+
+# Scripts typed into the in-app editor, and whatever they were saved as.
+backend/user_scripts/
+
+# Editable install metadata
+backend/*.egg-info/
+backend/user_robots/

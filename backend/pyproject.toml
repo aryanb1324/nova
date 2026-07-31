@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nova"
+version = "0.2.0"
+description = "Design a robot, train a policy for it, and watch it learn - in the browser"
+requires-python = ">=3.10"
+
+# Base install is deliberately light: enough to build robots, run environments,
+# and load/score an ONNX policy. That is all an evaluation worker needs, and it
+# means someone bringing their own training stack doesn't inherit ours.
+dependencies = [
+    "mujoco>=3.11,<4",
+    "gymnasium>=1.3,<2",
+    "numpy>=2,<3",
+    "onnx>=1.19,<2",
+    "onnxruntime>=1.23,<2",
+]
+
+[project.optional-dependencies]
+# Needed to train with the built-in PPO, and to export a torch policy to ONNX.
+train = ["stable-baselines3[extra]>=2.9,<3", "torch>=2.6"]
+serve = ["fastapi>=0.140,<1", "uvicorn[standard]>=0.50", "websockets>=15"]
+all = ["nova[train,serve]"]
+
+[project.scripts]
+nova = "nova.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["nova*"]
