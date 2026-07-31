@@ -24,12 +24,16 @@ import torch as th
 import torch.nn as nn
 
 import nova
+from nova import bench
 
 TASK, TEMPLATE = "reach", "reach_arm"
 ITERATIONS = 250          # 400k env steps — the same budget ppo_minimal.py uses
 EPISODES_PER_BATCH = 16
 LEARNING_RATE = 3e-3
 GAMMA = 0.99
+
+# Lets the benchmark harness run this file once per seed.
+SEED = bench.seed_from_env()
 
 
 class Policy(nn.Module):
@@ -67,8 +71,8 @@ def discounted_to_go(rewards: list[float], gamma: float) -> np.ndarray:
 
 
 def main() -> None:
-    th.manual_seed(0)
-    env = nova.make(TASK, TEMPLATE, seed=0)
+    th.manual_seed(SEED)
+    env = nova.make(TASK, TEMPLATE, seed=SEED)
     policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
     optimizer = th.optim.Adam(policy.parameters(), lr=LEARNING_RATE)
 
@@ -130,6 +134,7 @@ def main() -> None:
     scores.pop("rollout", None)
     print(f"\npublic   : {scores['public']}")
     print(f"held_out : {scores['held_out']}")
+    bench.record("reinforce", scores, steps=steps)
 
 
 if __name__ == "__main__":

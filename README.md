@@ -9,6 +9,9 @@ actually doing, and honest scoring on episodes your code never saw.
 
 Runs entirely on your own machine. No hardware, no cloud, no accounts.
 
+**[Findings](docs/FINDINGS.md)** — measured results, including a cross-embodiment
+transfer study and a conclusion this project got wrong, then corrected.
+
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
@@ -61,21 +64,70 @@ framework, because the first thing you do is change the middle of the loop.
 | Starter | What it is | Held-out success |
 |---|---|---|
 | `blank` | The loop with the algorithm removed | — |
-| `reinforce` | Vanilla policy gradient, ~90 lines of torch | **3%** |
-| `cem` | Cross-entropy method — no gradients at all | **0%** |
-| `ppo_minimal` | Readable PPO with GAE and clipping, no RL library | **87%** |
-| `sb3_custom` | Keep PPO, swap in your own network | **100%** |
+| `reinforce` | Vanilla policy gradient, ~90 lines of torch | **1% ± 1** |
+| `cem` | Cross-entropy method — no gradients at all | **3% ± 4** |
+| `ppo_minimal` | Readable PPO with GAE and clipping, no RL library | **70% ± 16** |
+| `sb3_custom` | Keep PPO, swap in your own network | **87% ± 12** |
 
-All measured on the reach task at an identical 400k-step budget on an M5. That
-spread is the point: same environment, same budget, same network sizes, and the
-difference is entirely in the algorithm. `reinforce` and `ppo_minimal` are about
-the same length — what separates 3% from 87% is a learned baseline, importance
-ratios, and reusing each batch.
+**Five training seeds each**, identical 400k-step budget, scored on held-out
+episodes. Reproduce with `nova bench --seeds 5` (~27 min).
 
-`cem` is instructive in a different way. It drives its *training* return to about
-−9 and still scores 0% on unseen targets, because it optimises a fixed set of
-episodes and memorises them. That is exactly what held-out scoring exists to
-catch.
+The ± is not decoration. An earlier version of this table reported single-run
+numbers — 87% and 100% for the two PPO variants. Both were flattering: at five
+seeds they are 70% and 87%, and the run-to-run spread is wider than several of
+the differences a reader would want to draw from such a table. One run of an RL
+algorithm is an anecdote.
+
+What survives the error bars is the gap that matters. `reinforce` and
+`ppo_minimal` are about the same length and see the same data; the difference
+between 1% and 70% is entirely a learned baseline, importance ratios, and
+reusing each batch.
+
+`cem` is instructive differently. It drives its *training* return to about −9 and
+still scores ~3% on unseen targets, because it optimises a fixed set of episodes
+and memorises them. That is what held-out scoring exists to catch.
+
+## A study you can run: does a policy survive a body it never trained on?
+
+Because robots are parametric, NOVA can ask a question that usually needs a lab:
+train on one arm, then run that policy unchanged on arms with different link
+lengths, motor strengths, and limb masses.
+
+```bash
+python -m examples.cross_body_study --seeds 3     # ~2 min
+```
+
+Three training seeds, scored zero-shot on held-out episodes:
+
+| body | success (held-out) | retained |
+|---|---|---|
+| baseline | 96% ± 5 | — |
+| forearm +20% | 92% ± 5 | 97% |
+| forearm +40% | 86% ± 12 | 90% |
+| upper arm +20% | 94% ± 7 | 99% |
+| both links +20% | 92% ± 8 | 97% |
+| links −20% | 98% ± 2 | 102% |
+| motors −30% | 96% ± 5 | 100% |
+| motors −50% | 96% ± 5 | 100% |
+| motors +50% | 96% ± 5 | 100% |
+| heavy links +30% | 89% ± 2 | 93% |
+| damping ×3 | 97% ± 6 | 101% |
+| heavy links +60% *(under-actuated)* | 30% ± 6 | n/a — body cannot hold itself |
+
+Two things stand out. **Transfer is far more robust than expected**: every
+physically feasible perturbation retains ≥90%, and halving or adding 50% to motor
+torque costs nothing measurable. **Mass is the expensive axis** — the only
+geometry change that costs real performance is making the limbs heavier.
+
+And the one catastrophic number is not a generalization failure at all. Scaling
+link radius by 1.6 multiplies mass by 2.56, which pushes the torque needed to
+hold the arm horizontal to 9.46 N·m against 8.00 N·m available. No policy can
+control that arm. The study computes this and labels it, because an earlier
+version of this table reported it as a transfer failure and the conclusion drawn
+from it — "inertia breaks generalization" — was simply wrong.
+
+That check lives in `nova/study/cross_body.py`; the raw per-seed data lands in
+`cross_body.json`.
 
 ### Is running code safe?
 
@@ -114,9 +166,11 @@ valid, simulatable body.
 | Quadruped | walk forward | 34 | 8 | 5 s at 50 Hz |
 
 Throughput is 12,000–16,000 environment steps/second on a 10-core M5. For
-reference, the built-in PPO reaches 100% on the reach task in ~30 s, the rover
-drives 13.2 m in ~13 s, and the quadruped manages a 2.8 m shuffle in ~66 s. The
-quadruped is the honest weak spot — its reward has no gait structure yet.
+reference, the built-in PPO reaches **96% ± 5** on the reach task in ~30 s of
+training (3 seeds, held-out episodes). The rover drives 13.2 m in ~13 s and the
+quadruped manages a 2.8 m shuffle in ~66 s — both still single-seed numbers, and
+so should be read as indicative rather than measured. The quadruped is the honest
+weak spot either way: its reward has no gait structure yet.
 
 Every parameter combination is checked: all 47 slider extremes across the three
 templates compile and step without producing a non-finite state.

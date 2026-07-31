@@ -19,6 +19,7 @@ import torch as th
 import torch.nn as nn
 
 import nova
+from nova import bench
 
 TASK, TEMPLATE = "reach", "reach_arm"
 
@@ -32,6 +33,9 @@ GAE_LAMBDA = 0.95
 CLIP = 0.2
 ENT_COEF = 0.01
 VF_COEF = 0.5
+
+# Lets the benchmark harness run this file once per seed.
+SEED = bench.seed_from_env()
 
 
 class ActorCritic(nn.Module):
@@ -65,15 +69,15 @@ class ActorCritic(nn.Module):
 
 
 def main() -> None:
-    th.manual_seed(0)
-    env = nova.make(TASK, TEMPLATE, seed=0)
+    th.manual_seed(SEED)
+    env = nova.make(TASK, TEMPLATE, seed=SEED)
     obs_dim = env.observation_space.shape[0]
     act_dim = env.action_space.shape[0]
 
     net = ActorCritic(obs_dim, act_dim)
     optimizer = th.optim.Adam(net.parameters(), lr=LEARNING_RATE, eps=1e-5)
 
-    obs, _ = env.reset(seed=0)
+    obs, _ = env.reset(seed=SEED)
     episode_return, recent = 0.0, []
     steps = 0
 
@@ -173,6 +177,7 @@ def main() -> None:
     scores.pop("rollout", None)
     print(f"\npublic   : {scores['public']}")
     print(f"held_out : {scores['held_out']}")
+    bench.record("ppo_minimal", scores, steps=steps)
 
 
 if __name__ == "__main__":

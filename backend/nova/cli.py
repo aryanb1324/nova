@@ -69,6 +69,16 @@ def main(argv: list[str] | None = None) -> int:
     p_init.add_argument("--starter", default="ppo_minimal",
                         help="which reference implementation to start from")
 
+    p_bench = sub.add_parser(
+        "bench", help="run the reference algorithms across seeds and report mean +/- std")
+    p_bench.add_argument("--seeds", type=int, default=5,
+                         help="number of training seeds per algorithm")
+    p_bench.add_argument("--only", default="",
+                         help="comma-separated subset of algorithms")
+    p_bench.add_argument("--out", default="bench_results.jsonl")
+    p_bench.add_argument("--report-only", action="store_true",
+                         help="summarize an existing log without running anything")
+
     p_serve = sub.add_parser("serve", help="run the API server")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
@@ -111,6 +121,32 @@ def main(argv: list[str] | None = None) -> int:
         print("  README.md")
         print(f"\nnext:\n  cd {target} && python train.py")
         print("  (start the NOVA app first and it will stream into the browser)")
+        return 0
+
+    if args.command == "bench":
+        from nova import bench
+
+        labels = tuple(s.strip() for s in args.only.split(",") if s.strip()) \
+            or tuple(bench.STARTERS)
+        seeds = tuple(range(args.seeds))
+
+        if not args.report_only:
+            estimate = sum(bench.STARTERS.get(x, 90) for x in labels) * len(seeds)
+            print(f"running {len(labels)} algorithms x {len(seeds)} seeds "
+                  f"(~{estimate // 60} min, sequential)\n")
+
+            def progress(label, seed, status, elapsed):
+                print(f"  {label:<13} seed {seed}  {status:<12} {elapsed:>6.1f}s",
+                      flush=True)
+
+            bench.run_sweep(labels, seeds, out=args.out, on_progress=progress)
+
+        entries = bench.load(args.out)
+        if not entries:
+            print(f"no results in {args.out}", file=sys.stderr)
+            return 1
+        print("\nHeld-out seeds, mean ± std across training seeds:\n")
+        print(bench.format_table(bench.summarize(entries, split="held_out")))
         return 0
 
     if args.command == "catalog":

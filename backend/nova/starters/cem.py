@@ -21,6 +21,7 @@ import torch as th
 import torch.nn as nn
 
 import nova
+from nova import bench
 
 TASK, TEMPLATE = "reach", "reach_arm"
 ITERATIONS = 30
@@ -29,6 +30,9 @@ ELITE = 6
 TRAIN_EPISODES = 8      # the fixed set every candidate is scored on
 SIGMA = 0.5
 HIDDEN = 0              # 0 = linear policy; CEM struggles as dimension grows
+
+# Lets the benchmark harness run this file once per seed.
+SEED = bench.seed_from_env()
 
 
 class Policy(nn.Module):
@@ -79,7 +83,7 @@ def main() -> None:
     n = policy.n_params
     print(f"searching {n} parameters directly")
 
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(SEED)
     mean, sigma = np.zeros(n), np.full(n, SIGMA)
     train_seeds = [7_000 + k for k in range(TRAIN_EPISODES)]
 
@@ -126,6 +130,7 @@ def main() -> None:
     print(f"\ntrain    : {train}")
     print(f"held_out : {scores['held_out']}")
     print(f"\nThe drop between those two is the whole lesson.")
+    bench.record("cem", scores, steps=steps)
 
 
 if __name__ == "__main__":

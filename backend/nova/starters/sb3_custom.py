@@ -21,10 +21,14 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 import nova
+from nova import bench
 
 TASK, TEMPLATE = "reach", "reach_arm"
 TOTAL_STEPS = 400_000
 N_ENVS = 16     # measured sweet spot on a 10-core machine
+
+# Lets the benchmark harness run this file once per seed.
+SEED = bench.seed_from_env()
 
 
 class MyExtractor(BaseFeaturesExtractor):
@@ -76,7 +80,7 @@ class StreamToNova(BaseCallback):
 def main() -> None:
     th.set_num_threads(1)   # the env workers already own the cores
 
-    vec = make_vec_env(make_env, n_envs=N_ENVS, seed=0, vec_env_cls=SubprocVecEnv,
+    vec = make_vec_env(make_env, n_envs=N_ENVS, seed=SEED, vec_env_cls=SubprocVecEnv,
                        monitor_kwargs={"info_keywords": ("is_success",)})
     model = PPO(
         "MlpPolicy", vec,
@@ -87,7 +91,7 @@ def main() -> None:
         },
         n_steps=256, batch_size=1024, n_epochs=10,
         learning_rate=1e-3, ent_coef=0.01, gamma=0.98,
-        device="cpu", seed=0, verbose=0,
+        device="cpu", seed=SEED, verbose=0,
     )
     print(model.policy)
 
@@ -102,6 +106,7 @@ def main() -> None:
     scores.pop("rollout", None)
     print(f"\npublic   : {scores['public']}")
     print(f"held_out : {scores['held_out']}")
+    bench.record("sb3_custom", scores, steps=TOTAL_STEPS)
 
 
 if __name__ == "__main__":

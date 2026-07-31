@@ -24,3 +24,5 @@ backend/user_scripts/
 # Editable install metadata
 backend/*.egg-info/
 backend/user_robots/
+backend/bench_results.jsonl
+backend/cross_body.json
